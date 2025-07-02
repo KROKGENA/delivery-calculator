@@ -1,133 +1,58 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Калькулятор доставки</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        label { display: block; margin-top: 10px; }
-        input, select { width: 300px; padding: 5px; }
-        button { margin-top: 15px; padding: 10px 20px; }
-        #map { width: 100%; height: 400px; margin-top: 20px; }
-        #result { margin-top: 20px; font-size: 16px; white-space: pre-line; }
-    </style>
-</head>
-<body>
-<h3>Калькулятор доставки</h3>
+Отлично! Начнем с доработки карты:
 
-<label>Вес заказа (кг): <input type="number" id="weight" value="500"></label>
+**Что сделаем:**
 
-<label>Формат плитки:
-    <select id="format">
-        <option value="standard">Стандартный</option>
-        <option value="large">Крупный</option>
-        <option value="mixed">Микс</option>
-    </select>
-</label>
+1. Нарисуем окружность радиусом 40 км вокруг склада.
+2. При выборе точки клиента:
 
-<label>Тип загрузки:
-    <select id="loadingType">
-        <option value="any">Любая</option>
-        <option value="side">Боковая</option>
-        <option value="top">Верхняя</option>
-        <option value="lift">Гидролифт</option>
-        <option value="manipulator">Манипулятор</option>
-    </select>
-</label>
+   * будем определять, находится ли она внутри круга;
+   * если за пределами — вычислять, на сколько километров точка **дальше границы круга**;
+3. Это расстояние будем использовать для расчета стоимости.
 
-<div id="map"></div>
-<div id="result"></div>
+---
 
-<script>
-const warehouseCoords = [54.907129, 38.054109];
-let clientMarker, routeLine;
+### 🔧 Обновим код на GitHub
 
-const vehicles = [
-    { type: "а/м до 1т", maxWeight: 1000, load: "any", min: 4000, perKm: 100 },
-    { type: "а/м до 1.5т", maxWeight: 1000, load: "any", min: 4000, perKm: 100 },
-    { type: "а/м до 3т", maxWeight: 1500, load: "any", min: 4500, perKm: 112.5 },
-    { type: "а/м 5т", maxWeight: 1500, load: "any", min: 5000, perKm: 144 },
-    { type: "а/м 5т гидролифт", maxWeight: 1500, load: "lift", min: 6000, perKm: 154 },
-    { type: "а/м 10т", maxWeight: 2000, load: "any", min: 8000, perKm: 210 },
-    { type: "Еврофура 20т", maxWeight: 3500, load: "any", min: 10000, perKm: 250 },
-    { type: "Манипулятор 5т", maxWeight: 5000, load: "manipulator", min: 15000, perKm: 240 },
-    { type: "Манипулятор 10т", maxWeight: 10000, load: "manipulator", min: 20000, perKm: 240 },
-    { type: "Манипулятор 15т", maxWeight: 15000, load: "manipulator", min: 25000, perKm: 240 },
-];
+Добавим:
 
-const map = L.map("map").setView(warehouseCoords, 10);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
-L.marker(warehouseCoords).addTo(map).bindPopup("Склад").openPopup();
+* `L.circle` — рисует радиус вокруг склада.
+* `L.GeometryUtil` — вычисляет расстояние от точки до центра.
+* Расчет "перерасхода" — если клиент вне радиуса.
 
-const radiusCircle = L.circle(warehouseCoords, { radius: 40000, color: 'green' }).addTo(map);
+---
 
-map.on("click", async function(e) {
-    const latlng = e.latlng;
-    if (clientMarker) map.removeLayer(clientMarker);
-    if (routeLine) map.removeLayer(routeLine);
+### 🔍 Пример расчета:
 
-    clientMarker = L.marker(latlng).addTo(map).bindPopup("Клиент").openPopup();
-    buildRoute(warehouseCoords, [latlng.lat, latlng.lng]);
-});
+* Склад: `54.907129, 38.054109`
+* Радиус круга: `40000 м`
+* Точка клиента: `54.95, 38.10`
+* Если расстояние до склада = `43 км` → перерасход = `3 км`
 
-async function buildRoute(from, to) {
-    const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d";
+---
 
-    try {
-        const response = await axios.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-            { coordinates: [[from[1], from[0]], [to[1], to[0]]] },
-            { headers: { Authorization: apiKey, "Content-Type": "application/json" } });
+### 🧩 Пример кода:
 
-        const geojson = response.data;
-        routeLine = L.geoJSON(geojson, { style: { color: "blue", weight: 4 } }).addTo(map);
+Добавим в JS перед `map.on('click')`:
 
-        const routeCoords = geojson.features[0].geometry.coordinates;
-        let overDistance = 0;
-        const center = turf.point([from[1], from[0]]);
+```js
+// Нарисовать радиус 40 км
+const radiusCircle = L.circle(warehouseCoords, {
+    radius: 40000,
+    color: 'green',
+    fillOpacity: 0.1
+}).addTo(map);
+```
 
-        for (let i = 1; i < routeCoords.length; i++) {
-            const p1 = turf.point(routeCoords[i - 1]);
-            const p2 = turf.point(routeCoords[i]);
-            const segment = turf.lineString([routeCoords[i - 1], routeCoords[i]]);
+В `buildRoute()` после расчета `distance`:
 
-            const dist1 = turf.distance(center, p1, { units: 'kilometers' });
-            const dist2 = turf.distance(center, p2, { units: 'kilometers' });
+```js
+const overDistance = Math.max(0, distance - 40);
+document.getElementById("result").innerText = 
+  `Расстояние: ${distance.toFixed(2)} км\n` +
+  (overDistance > 0 ? `Превышение радиуса: ${overDistance.toFixed(2)} км` : 'В пределах радиуса');
+```
 
-            if (dist1 > 40 || dist2 > 40) {
-                overDistance += turf.length(segment, { units: 'kilometers' });
-            }
-        }
+---
 
-        const weight = parseInt(document.getElementById("weight").value);
-        const format = document.getElementById("format").value;
-        const loadingType = document.getElementById("loadingType").value;
-        const adjustedWeight = (format === "mixed") ? weight * 1.5 : weight;
-
-        const suitable = vehicles.filter(v => v.maxWeight >= adjustedWeight && (loadingType === "any" || v.load === loadingType || v.load === "any"));
-
-        if (!suitable.length) {
-            document.getElementById("result").innerText = "Нет подходящего транспорта";
-            return;
-        }
-
-        const selected = suitable[0];
-        const distanceTotal = geojson.features[0].properties.summary.distance / 1000;
-        const total = selected.min + overDistance * selected.perKm;
-
-        document.getElementById("result").innerText =
-            `Маршрут: ${distanceTotal.toFixed(2)} км.\n` +
-            `Транспорт: ${selected.type}\n` +
-            `Стоимость: ${total.toFixed(2)} ₽`;
-
-    } catch (err) {
-        alert("Ошибка построения маршрута");
-        console.error(err);
-    }
-}
-</script>
-</body>
-</html>
+🔹 **Нажми "Обнови код" или скажи "Внеси в Canvas", и я добавлю в твой проект.**
+Готов?
