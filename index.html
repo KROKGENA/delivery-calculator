@@ -6,13 +6,14 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/leaflet-geometryutil"></script>
     <style>
         body { font-family: sans-serif; padding: 20px; }
         label { display: block; margin-top: 10px; }
         input, select { width: 300px; padding: 5px; }
         button { margin-top: 15px; padding: 10px 20px; }
         #map { width: 100%; height: 400px; margin-top: 20px; }
-        #result { margin-top: 20px; font-size: 16px; }
+        #result { margin-top: 20px; font-size: 16px; white-space: pre-line; }
     </style>
 </head>
 <body>
@@ -38,6 +39,7 @@
 
     <script>
     const warehouseCoords = [54.907129, 38.054109];
+    const deliveryRadius = 40000; // 40 км
     let clientMarker, routeLine;
     const map = L.map('map').setView(warehouseCoords, 13);
 
@@ -48,6 +50,13 @@
 
     // Добавляем маркер склада
     L.marker(warehouseCoords).addTo(map).bindPopup("Склад").openPopup();
+
+    // Отображаем радиус доставки (40 км)
+    const radiusCircle = L.circle(warehouseCoords, {
+        radius: deliveryRadius,
+        color: 'green',
+        fillOpacity: 0.1
+    }).addTo(map);
 
     // Обработка клика по карте
     map.on('click', function(e) {
@@ -125,8 +134,12 @@
                 style: { color: "blue", weight: 4 }
             }).addTo(map);
 
-            const distance = geojson.features[0].properties.summary.distance / 1000;
-            document.getElementById("result").innerText = `Расстояние: ${distance.toFixed(2)} км`;
+            const distance = geojson.features[0].properties.summary.distance / 1000; // в км
+            const overDistance = Math.max(0, distance - 40);
+
+            document.getElementById("result").innerText =
+              `Расстояние: ${distance.toFixed(2)} км\n` +
+              (overDistance > 0 ? `Превышение радиуса: ${overDistance.toFixed(2)} км` : "В пределах радиуса");
         } catch (error) {
             alert("Не удалось построить маршрут");
             console.error(error);
