@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Калькулятор доставки</title>
+
+    <!-- Подключение API Яндекс.Карт с вашим ключом -->
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=b78d18c6-1c5f-472d-b3c8-adbd3c053ce7&lang=ru_RU"></script>
+
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        label { display: block; margin-top: 10px; }
+        input, select { width: 300px; padding: 5px; }
+        button { margin-top: 15px; padding: 10px 20px; }
+        #map { width: 100%; height: 400px; margin-top: 20px; }
+        #result { margin-top: 20px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h2>Калькулятор доставки</h2>
+
+    <!-- Ввод веса -->
+    <label>Вес (в кг):</label>
+    <input id="weight" type="number" value="500">
+
+    <!-- Выбор формата плитки -->
+    <label>Формат плитки:</label>
+    <select id="format">
+        <option value="standard">Стандартный</option>
+        <option value="large">Крупный</option>
+        <option value="fragile">Хрупкий</option>
+    </select>
+
+    <!-- Адрес клиента -->
+    <label>Адрес клиента:</label>
+    <input id="address" type="text" placeholder="Например: Москва, ул. Тверская, 1">
+
+    <p>Кликните на карте, чтобы выбрать точку клиента. Склад по умолчанию: 54.907129, 38.054109</p>
+
+    <!-- Карта -->
+    <div id="map"></div>
+    <div id="result"></div>
+
+    <script>
+    ymaps.ready(function () {
+        // Координаты склада
+        const warehouseCoords = [54.907129, 38.054109];
+
+        // Инициализация карты
+        let map = new ymaps.Map("map", {
+            center: warehouseCoords,
+            zoom: 12
+        });
+
+        // Метка склада
+        let warehousePlacemark = new ymaps.Placemark(warehouseCoords, {
+            iconCaption: 'Склад'
+        }, { preset: 'islands#greenDotIconWithCaption' });
+        map.geoObjects.add(warehousePlacemark);
+
+        let clientPlacemark;
+        let multiRoute;
+
+        // Обработка клика по карте
+        map.events.add('click', function (e) {
+            let coords = e.get('coords');
+
+            // Удаление предыдущей метки клиента
+            if (clientPlacemark) {
+                map.geoObjects.remove(clientPlacemark);
+            }
+
+            // Добавление новой метки клиента
+            clientPlacemark = new ymaps.Placemark(coords, {
+                iconCaption: 'Клиент'
+            }, { preset: 'islands#redDotIconWithCaption' });
+            map.geoObjects.add(clientPlacemark);
+
+            // Определение адреса по координатам
+            ymaps.geocode(coords, { results: 1 }).then(function (res) {
+                const geoObject = res.geoObjects.get(0);
+                if (geoObject) {
+                    const fullAddress = geoObject.getAddressLine();
+                    document.getElementById("address").value = fullAddress;
+                } else {
+                    document.getElementById("address").value = "Адрес не найден";
+                }
+            }).catch(function () {
+                document.getElementById("address").value = "Ошибка геокодирования";
+            });
+
+            // Удаление старого маршрута
+            if (multiRoute) {
+                map.geoObjects.remove(multiRoute);
+            }
+
+            // Построение нового маршрута
+            multiRoute = new ymaps.multiRouter.MultiRoute({
+                referencePoints: [warehouseCoords, coords],
+                params: { routingMode: 'auto' }
+            }, {
+                boundsAutoApply: true
+            });
+
+            // Добавляем маршрут на карту при успешной загрузке
+            multiRoute.model.events.add("requestsuccess", function () {
+                map.geoObjects.add(multiRoute);
+            });
+
+            // Обработка ошибки построения маршрута
+            multiRoute.model.events.add("requestfail", function () {
+                alert("Не удалось построить маршрут. Попробуйте выбрать другую точку.");
+            });
+        });
+    });
+    </script>
+</body>
+</html>
