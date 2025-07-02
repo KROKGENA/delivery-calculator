@@ -6,14 +6,13 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <script src="https://unpkg.com/leaflet-geometryutil"></script>
     <style>
         body { font-family: sans-serif; padding: 20px; }
         label { display: block; margin-top: 10px; }
         input, select { width: 300px; padding: 5px; }
         button { margin-top: 15px; padding: 10px 20px; }
         #map { width: 100%; height: 400px; margin-top: 20px; }
-        #result { margin-top: 20px; font-size: 16px; white-space: pre-line; }
+        #result { margin-top: 20px; font-size: 16px; }
     </style>
 </head>
 <body>
@@ -26,8 +25,13 @@
     <select id="format">
         <option value="standard">Стандартный</option>
         <option value="large">Крупный</option>
-        <option value="fragile">Хрупкий</option>
+        <option value="mixed">Микс</option>
     </select>
+
+    <label><input type="checkbox" id="sideLoading"> Боковая загрузка</label>
+    <label><input type="checkbox" id="topLoading"> Верхняя загрузка</label>
+    <label><input type="checkbox" id="hydrolift"> Гидролифт</label>
+    <label><input type="checkbox" id="manipulator"> Манипулятор</label>
 
     <label>Адрес клиента:</label>
     <input id="address" type="text" placeholder="Например: Москва, ул. Тверская, 1">
@@ -39,8 +43,7 @@
 
     <script>
     const warehouseCoords = [54.907129, 38.054109];
-    const deliveryRadius = 40000; // 40 км
-    let clientMarker, routeLine;
+    let clientMarker, routeLine, radiusCircle;
     const map = L.map('map').setView(warehouseCoords, 13);
 
     // Добавляем карту OSM
@@ -48,15 +51,26 @@
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Добавляем маркер склада
+    // Добавляем маркер и радиус склада
     L.marker(warehouseCoords).addTo(map).bindPopup("Склад").openPopup();
-
-    // Отображаем радиус доставки (40 км)
-    const radiusCircle = L.circle(warehouseCoords, {
-        radius: deliveryRadius,
+    radiusCircle = L.circle(warehouseCoords, {
+        radius: 40000,
         color: 'green',
         fillOpacity: 0.1
     }).addTo(map);
+
+    const vehicles = [
+        { type: "а/м до 1т", maxWeight: 1000, side: true, top: true, hydro: false, manip: false, min: 4000, perKm: 100 },
+        { type: "а/м до 1.5т", maxWeight: 1500, side: true, top: true, hydro: false, manip: false, min: 4000, perKm: 100 },
+        { type: "а/м до 3т", maxWeight: 3000, side: true, top: true, hydro: false, manip: false, min: 4500, perKm: 112.5 },
+        { type: "а/м 5т", maxWeight: 5000, side: true, top: true, hydro: false, manip: false, min: 5000, perKm: 144 },
+        { type: "а/м 5т гидролифт", maxWeight: 5000, side: false, top: false, hydro: true, manip: false, min: 6000, perKm: 154 },
+        { type: "а/м 10т", maxWeight: 10000, side: true, top: true, hydro: false, manip: false, min: 8000, perKm: 210 },
+        { type: "Еврофура 20т", maxWeight: 20000, side: true, top: true, hydro: false, manip: false, min: 10000, perKm: 250 },
+        { type: "Манипулятор 5т", maxWeight: 5000, side: false, top: false, hydro: false, manip: true, min: 15000, perKm: 240 },
+        { type: "Манипулятор 10т", maxWeight: 10000, side: false, top: false, hydro: false, manip: true, min: 20000, perKm: 240 },
+        { type: "Манипулятор 15т", maxWeight: 15000, side: false, top: false, hydro: false, manip: true, min: 25000, perKm: 240 },
+    ];
 
     // Обработка клика по карте
     map.on('click', function(e) {
@@ -70,7 +84,6 @@
         buildRoute(warehouseCoords, [latlng.lat, latlng.lng]);
     });
 
-    // Кнопка геокодирования
     document.getElementById("geocode").addEventListener("click", async () => {
         const address = document.getElementById("address").value;
         if (!address) return;
@@ -96,50 +109,51 @@
         }
     });
 
-    // Обратное геокодирование (координаты → адрес)
     async function reverseGeocode(lat, lon) {
         const response = await axios.get("https://nominatim.openstreetmap.org/reverse", {
-            params: {
-                lat, lon, format: "json"
-            }
+            params: { lat, lon, format: "json" }
         });
-
-        if (response.data && response.data.display_name) {
-            document.getElementById("address").value = response.data.display_name;
-        } else {
-            document.getElementById("address").value = "Не удалось определить адрес";
-        }
+        document.getElementById("address").value = response.data?.display_name || "Не удалось определить адрес";
     }
 
-    // Построение маршрута через OpenRouteService (требуется API-ключ)
     async function buildRoute(from, to) {
-        const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d"; // <-- Вставьте свой ключ ORS
+        const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d";
 
         try {
             const response = await axios.post(
                 "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-                {
-                    coordinates: [[from[1], from[0]], [to[1], to[0]]]
-                },
-                {
-                    headers: {
-                        Authorization: apiKey,
-                        "Content-Type": "application/json"
-                    }
-                }
+                { coordinates: [[from[1], from[0]], [to[1], to[0]]] },
+                { headers: { Authorization: apiKey, "Content-Type": "application/json" } }
             );
 
             const geojson = response.data;
-            routeLine = L.geoJSON(geojson, {
-                style: { color: "blue", weight: 4 }
-            }).addTo(map);
+            routeLine = L.geoJSON(geojson, { style: { color: "blue", weight: 4 } }).addTo(map);
 
-            const distance = geojson.features[0].properties.summary.distance / 1000; // в км
-            const overDistance = Math.max(0, distance - 40);
+            const distanceKm = geojson.features[0].properties.summary.distance / 1000;
+            const weight = parseInt(document.getElementById("weight").value);
+            const format = document.getElementById("format").value;
+            const side = document.getElementById("sideLoading").checked;
+            const top = document.getElementById("topLoading").checked;
+            const hydro = document.getElementById("hydrolift").checked;
+            const manip = document.getElementById("manipulator").checked;
 
-            document.getElementById("result").innerText =
-              `Расстояние: ${distance.toFixed(2)} км\n` +
-              (overDistance > 0 ? `Превышение радиуса: ${overDistance.toFixed(2)} км` : "В пределах радиуса");
+            const adjustedWeight = (format === "mixed") ? weight * 1.5 : weight;
+            const sorted = vehicles.filter(v =>
+                v.maxWeight >= adjustedWeight &&
+                (!side || v.side) && (!top || v.top) &&
+                (!hydro || v.hydro) && (!manip || v.manip)
+            );
+
+            if (!sorted.length) {
+                document.getElementById("result").innerText = "Нет подходящего транспорта";
+                return;
+            }
+
+            const selected = sorted[0];
+            const overDistance = Math.max(0, distanceKm - 40);
+            const total = selected.min + overDistance * selected.perKm;
+
+            document.getElementById("result").innerText = `Маршрут: ${distanceKm.toFixed(2)} км. Транспорт: ${selected.type}. Стоимость: ${total.toFixed(2)} ₽`;
         } catch (error) {
             alert("Не удалось построить маршрут");
             console.error(error);
