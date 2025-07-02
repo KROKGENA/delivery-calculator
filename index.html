@@ -1,59 +1,137 @@
-<script>
-ymaps.ready(function () {
-    const warehouseCoords = [54.907129, 38.054109]; // Координаты склада
-    let map = new ymaps.Map("map", {
-        center: warehouseCoords,
-        zoom: 12
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Калькулятор доставки (OpenStreetMap)</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        label { display: block; margin-top: 10px; }
+        input, select { width: 300px; padding: 5px; }
+        button { margin-top: 15px; padding: 10px 20px; }
+        #map { width: 100%; height: 400px; margin-top: 20px; }
+        #result { margin-top: 20px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h2>Калькулятор доставки (на базе OpenStreetMap)</h2>
+
+    <label>Вес (в кг):</label>
+    <input id="weight" type="number" value="500">
+
+    <label>Формат плитки:</label>
+    <select id="format">
+        <option value="standard">Стандартный</option>
+        <option value="large">Крупный</option>
+        <option value="fragile">Хрупкий</option>
+    </select>
+
+    <label>Адрес клиента:</label>
+    <input id="address" type="text" placeholder="Например: Москва, ул. Тверская, 1">
+    <button id="geocode">Определить координаты</button>
+
+    <p>Кликните на карту, чтобы выбрать точку клиента. Склад по умолчанию: 54.907129, 38.054109</p>
+    <div id="map"></div>
+    <div id="result"></div>
+
+    <script>
+    const warehouseCoords = [54.907129, 38.054109];
+    let clientMarker, routeLine;
+    const map = L.map('map').setView(warehouseCoords, 13);
+
+    // Добавляем карту OSM
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Добавляем маркер склада
+    L.marker(warehouseCoords).addTo(map).bindPopup("Склад").openPopup();
+
+    // Обработка клика по карте
+    map.on('click', function(e) {
+        const latlng = e.latlng;
+        if (clientMarker) map.removeLayer(clientMarker);
+        if (routeLine) map.removeLayer(routeLine);
+
+        clientMarker = L.marker(latlng).addTo(map).bindPopup("Клиент").openPopup();
+
+        reverseGeocode(latlng.lat, latlng.lng);
+        buildRoute(warehouseCoords, [latlng.lat, latlng.lng]);
     });
 
-    // Метка склада
-    let warehousePlacemark = new ymaps.Placemark(warehouseCoords, {
-        iconCaption: 'Склад'
-    }, {
-        preset: 'islands#greenDotIconWithCaption'
-    });
-    map.geoObjects.add(warehousePlacemark);
+    // Кнопка геокодирования
+    document.getElementById("geocode").addEventListener("click", async () => {
+        const address = document.getElementById("address").value;
+        if (!address) return;
 
-    let clientPlacemark = null;
-    let route = null;
+        const response = await axios.get("https://nominatim.openstreetmap.org/search", {
+            params: {
+                q: address,
+                format: "json",
+                limit: 1
+            }
+        });
 
-    // Клик по карте
-    map.events.add('click', function (e) {
-        const coords = e.get('coords');
+        if (response.data && response.data.length > 0) {
+            const { lat, lon } = response.data[0];
+            map.setView([lat, lon], 14);
+            if (clientMarker) map.removeLayer(clientMarker);
+            if (routeLine) map.removeLayer(routeLine);
 
-        // Удаляем старую метку клиента
-        if (clientPlacemark) {
-            map.geoObjects.remove(clientPlacemark);
+            clientMarker = L.marker([lat, lon]).addTo(map).bindPopup("Клиент").openPopup();
+            buildRoute(warehouseCoords, [lat, lon]);
+        } else {
+            alert("Адрес не найден");
         }
-
-        // Ставим метку клиента
-        clientPlacemark = new ymaps.Placemark(coords, {
-            iconCaption: 'Клиент'
-        }, {
-            preset: 'islands#redDotIconWithCaption'
-        });
-        map.geoObjects.add(clientPlacemark);
-
-        // Определяем адрес по координатам
-        ymaps.geocode(coords).then(function (res) {
-            const firstGeoObject = res.geoObjects.get(0);
-            const address = firstGeoObject ? firstGeoObject.getAddressLine() : 'Адрес не найден';
-            document.getElementById('address').value = address;
-        });
-
-        // Удаляем старый маршрут
-        if (route) {
-            map.geoObjects.remove(route);
-        }
-
-        // Строим новый маршрут
-        ymaps.route([warehouseCoords, coords]).then(function (newRoute) {
-            route = newRoute;
-            map.geoObjects.add(route);
-            map.setBounds(route.getBounds(), { checkZoomRange: true });
-        }).catch(function (error) {
-            alert("Не удалось построить маршрут: " + error.message);
-        });
     });
-});
-</script>
+
+    // Обратное геокодирование (координаты → адрес)
+    async function reverseGeocode(lat, lon) {
+        const response = await axios.get("https://nominatim.openstreetmap.org/reverse", {
+            params: {
+                lat, lon, format: "json"
+            }
+        });
+
+        if (response.data && response.data.display_name) {
+            document.getElementById("address").value = response.data.display_name;
+        } else {
+            document.getElementById("address").value = "Не удалось определить адрес";
+        }
+    }
+
+    // Построение маршрута через OpenRouteService (требуется API-ключ)
+    async function buildRoute(from, to) {
+        const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d"; // <-- Вставьте свой ключ ORS
+
+        try {
+            const response = await axios.post(
+                "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+                {
+                    coordinates: [[from[1], from[0]], [to[1], to[0]]]
+                },
+                {
+                    headers: {
+                        Authorization: apiKey,
+                        "Content-Type": "application/json"
+                    }
+                }
+            );
+
+            const geojson = response.data;
+            routeLine = L.geoJSON(geojson, {
+                style: { color: "blue", weight: 4 }
+            }).addTo(map);
+
+            const distance = geojson.features[0].properties.summary.distance / 1000;
+            document.getElementById("result").innerText = `Расстояние: ${distance.toFixed(2)} км`;
+        } catch (error) {
+            alert("Не удалось построить маршрут");
+            console.error(error);
+        }
+    }
+    </script>
+</body>
+</html>
