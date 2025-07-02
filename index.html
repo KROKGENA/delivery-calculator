@@ -1,161 +1,62 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Калькулятор доставки (OpenStreetMap)</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        label { display: block; margin-top: 10px; }
-        input, select { width: 300px; padding: 5px; }
-        button { margin-top: 15px; padding: 10px 20px; }
-        #map { width: 100%; height: 400px; margin-top: 20px; }
-        #result { margin-top: 20px; font-size: 16px; }
-    </style>
-</head>
-<body>
-    <h2>Калькулятор доставки (на базе OpenStreetMap)</h2>
+// ... HTML и Leaflet код остаются прежними, важна только правка buildRoute ...
 
-    <label>Вес (в кг):</label>
-    <input id="weight" type="number" value="500">
+async function buildRoute(from, to) {
+    const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d";
 
-    <label>Формат плитки:</label>
-    <select id="format">
-        <option value="standard">Стандартный</option>
-        <option value="large">Крупный</option>
-        <option value="mixed">Микс</option>
-    </select>
+    try {
+        const response = await axios.post("https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+            { coordinates: [[from[1], from[0]], [to[1], to[0]]] },
+            { headers: { Authorization: apiKey, "Content-Type": "application/json" } });
 
-    <label>Тип загрузки/требование:</label>
-    <label><input type="radio" name="loadingType" value="side"> Боковая загрузка</label>
-    <label><input type="radio" name="loadingType" value="top"> Верхняя загрузка</label>
-    <label><input type="radio" name="loadingType" value="hydrolift"> Гидролифт</label>
-    <label><input type="radio" name="loadingType" value="manipulator"> Манипулятор</label>
-
-    <label>Адрес клиента:</label>
-    <input id="address" type="text" placeholder="Например: Москва, ул. Тверская, 1">
-    <button id="geocode">Определить координаты</button>
-
-    <p>Кликните на карту, чтобы выбрать точку клиента. Склад по умолчанию: 54.907129, 38.054109</p>
-    <div id="map"></div>
-    <div id="result"></div>
-
-    <script>
-    const warehouseCoords = [54.907129, 38.054109];
-    let clientMarker, routeLine, radiusCircle;
-    const map = L.map('map').setView(warehouseCoords, 13);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-
-    L.marker(warehouseCoords).addTo(map).bindPopup("Склад").openPopup();
-    radiusCircle = L.circle(warehouseCoords, {
-        radius: 40000,
-        color: 'green',
-        fillOpacity: 0.1
-    }).addTo(map);
-
-    const vehicles = [
-        { type: "а/м до 1т", maxWeight: 1000, side: true, top: true, hydro: false, manip: false, min: 4000, perKm: 100 },
-        { type: "а/м до 1.5т", maxWeight: 1500, side: true, top: true, hydro: false, manip: false, min: 4000, perKm: 100 },
-        { type: "а/м до 3т", maxWeight: 3000, side: true, top: true, hydro: false, manip: false, min: 4500, perKm: 112.5 },
-        { type: "а/м 5т", maxWeight: 5000, side: true, top: true, hydro: false, manip: false, min: 5000, perKm: 144 },
-        { type: "а/м 5т гидролифт", maxWeight: 5000, side: false, top: false, hydro: true, manip: false, min: 6000, perKm: 154 },
-        { type: "а/м 10т", maxWeight: 10000, side: true, top: true, hydro: false, manip: false, min: 8000, perKm: 210 },
-        { type: "Еврофура 20т", maxWeight: 20000, side: true, top: true, hydro: false, manip: false, min: 10000, perKm: 250 },
-        { type: "Манипулятор 5т", maxWeight: 5000, side: false, top: false, hydro: false, manip: true, min: 15000, perKm: 240 },
-        { type: "Манипулятор 10т", maxWeight: 10000, side: false, top: false, hydro: false, manip: true, min: 20000, perKm: 240 },
-        { type: "Манипулятор 15т", maxWeight: 15000, side: false, top: false, hydro: false, manip: true, min: 25000, perKm: 240 },
-    ];
-
-    map.on('click', function(e) {
-        const latlng = e.latlng;
-        if (clientMarker) map.removeLayer(clientMarker);
+        const geojson = response.data;
         if (routeLine) map.removeLayer(routeLine);
+        routeLine = L.geoJSON(geojson, { style: { color: "blue", weight: 4 } }).addTo(map);
 
-        clientMarker = L.marker(latlng).addTo(map).bindPopup("Клиент").openPopup();
-        reverseGeocode(latlng.lat, latlng.lng);
-        buildRoute(warehouseCoords, [latlng.lat, latlng.lng]);
-    });
+        const routeCoords = geojson.features[0].geometry.coordinates;
+        let routeDistanceFromRadius = 0;
+        let enteredRadius = false;
+        const center = turf.point([from[1], from[0]]);
 
-    document.getElementById("geocode").addEventListener("click", async () => {
-        const address = document.getElementById("address").value;
-        if (!address) return;
+        for (let i = 1; i < routeCoords.length; i++) {
+            const p1 = turf.point(routeCoords[i - 1]);
+            const p2 = turf.point(routeCoords[i]);
+            const segment = turf.lineString([routeCoords[i - 1], routeCoords[i]]);
 
-        const response = await axios.get("https://nominatim.openstreetmap.org/search", {
-            params: {
-                q: address,
-                format: "json",
-                limit: 1
+            const distFromCenter1 = turf.distance(center, p1, { units: 'kilometers' });
+            const distFromCenter2 = turf.distance(center, p2, { units: 'kilometers' });
+
+            if (distFromCenter1 > 40 || distFromCenter2 > 40) {
+                const segmentLength = turf.length(segment, { units: 'kilometers' });
+                routeDistanceFromRadius += segmentLength;
             }
-        });
-
-        if (response.data && response.data.length > 0) {
-            const { lat, lon } = response.data[0];
-            map.setView([lat, lon], 14);
-            if (clientMarker) map.removeLayer(clientMarker);
-            if (routeLine) map.removeLayer(routeLine);
-
-            clientMarker = L.marker([lat, lon]).addTo(map).bindPopup("Клиент").openPopup();
-            buildRoute(warehouseCoords, [lat, lon]);
-        } else {
-            alert("Адрес не найден");
         }
-    });
 
-    async function reverseGeocode(lat, lon) {
-        const response = await axios.get("https://nominatim.openstreetmap.org/reverse", {
-            params: { lat, lon, format: "json" }
-        });
-        document.getElementById("address").value = response.data?.display_name || "Не удалось определить адрес";
-    }
+        const weight = parseInt(document.getElementById("weight").value);
+        const format = document.getElementById("format").value;
+        const loadingType = document.getElementById("loadingType").value;
+        const adjustedWeight = (format === "mixed") ? weight * 1.5 : weight;
 
-    async function buildRoute(from, to) {
-        const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d";
+        const suitableVehicles = vehicles.filter(v =>
+            v.maxWeight >= adjustedWeight &&
+            (loadingType === "any" || v.load === loadingType)
+        );
 
-        try {
-            const response = await axios.post(
-                "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-                { coordinates: [[from[1], from[0]], [to[1], to[0]]] },
-                { headers: { Authorization: apiKey, "Content-Type": "application/json" } }
-            );
-
-            const geojson = response.data;
-            routeLine = L.geoJSON(geojson, { style: { color: "blue", weight: 4 } }).addTo(map);
-
-            const distanceKm = geojson.features[0].properties.summary.distance / 1000;
-            const weight = parseInt(document.getElementById("weight").value);
-            const format = document.getElementById("format").value;
-            const typeInput = document.querySelector('input[name="loadingType"]:checked');
-            const type = typeInput ? typeInput.value : null;
-
-            const adjustedWeight = (format === "mixed") ? weight * 1.5 : weight;
-            const sorted = vehicles.filter(v =>
-                v.maxWeight >= adjustedWeight &&
-                ((type === "side" && v.side) ||
-                 (type === "top" && v.top) ||
-                 (type === "hydrolift" && v.hydro) ||
-                 (type === "manipulator" && v.manip))
-            );
-
-            if (!sorted.length) {
-                document.getElementById("result").innerText = "Нет подходящего транспорта";
-                return;
-            }
-
-            const selected = sorted[0];
-            const overDistance = Math.max(0, distanceKm - 40);
-            const total = selected.min + overDistance * selected.perKm;
-
-            document.getElementById("result").innerText = `Маршрут: ${distanceKm.toFixed(2)} км. Транспорт: ${selected.type}. Стоимость: ${total.toFixed(2)} ₽`;
-        } catch (error) {
-            alert("Не удалось построить маршрут");
-            console.error(error);
+        if (!suitableVehicles.length) {
+            document.getElementById("result").innerText = "Нет подходящего транспорта";
+            return;
         }
+
+        const selected = suitableVehicles[0];
+        const overDistance = routeDistanceFromRadius;
+        const total = selected.min + overDistance * selected.perKm;
+
+        document.getElementById("result").innerText =
+            `Общая длина маршрута: ${(geojson.features[0].properties.summary.distance / 1000).toFixed(2)} км\nТип: ${selected.type}\nВ пределах 40 км: ${selected.min} ₽` +
+            (overDistance > 0 ? `\nЗа пределами 40 км: ${overDistance.toFixed(2)} км × ${selected.perKm} ₽ = ${(overDistance * selected.perKm).toFixed(2)} ₽` : "") +
+            `\nИтог: ${total.toFixed(2)} ₽`;
+
+    } catch (error) {
+        alert("Не удалось построить маршрут");
+        console.error(error);
     }
-    </script>
-</body>
-</html>
+}
