@@ -1,5 +1,83 @@
-// ... HTML и Leaflet код остаются прежними, важна только правка buildRoute ...
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Калькулятор доставки</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script> <!-- Обязательно -->
+    <style>
+        #map { width: 100%; height: 400px; margin-top: 20px; }
+    </style>
+</head>
+<body>
 
+<h3>Калькулятор доставки</h3>
+
+<label>Вес заказа (кг): <input type="number" id="weight" value="500"></label><br>
+<label>Формат плитки:
+    <select id="format">
+        <option value="standard">Стандартный</option>
+        <option value="large">Крупный</option>
+        <option value="mixed">Микс</option>
+    </select>
+</label><br>
+<label>Тип загрузки:
+    <select id="loadingType">
+        <option value="any">Любой</option>
+        <option value="side">Боковая</option>
+        <option value="top">Верхняя</option>
+        <option value="lift">Гидролифт</option>
+        <option value="manipulator">Манипулятор</option>
+    </select>
+</label>
+
+<div id="map"></div>
+<div id="result"></div>
+
+<script>
+// Координаты склада
+const warehouseCoords = [54.907129, 38.054109];
+let clientMarker, routeLine;
+
+const map = L.map('map').setView(warehouseCoords, 10);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+// Круг 40 км
+const radiusCircle = L.circle(warehouseCoords, {
+    radius: 40000,
+    color: 'green',
+    fill: false
+}).addTo(map);
+
+// Маркер склада
+L.marker(warehouseCoords).addTo(map).bindPopup("Склад");
+
+// Клиентская точка
+map.on("click", e => {
+    if (clientMarker) map.removeLayer(clientMarker);
+    if (routeLine) map.removeLayer(routeLine);
+
+    clientMarker = L.marker(e.latlng).addTo(map).bindPopup("Клиент").openPopup();
+    buildRoute(warehouseCoords, [e.latlng.lat, e.latlng.lng]);
+});
+
+// Справочник транспорта
+const vehicles = [
+    { type: "а/м до 1т", maxWeight: 1000, load: "side", min: 4000, perKm: 100 },
+    { type: "а/м до 1.5т", maxWeight: 1500, load: "side", min: 4000, perKm: 100 },
+    { type: "а/м до 3т", maxWeight: 3000, load: "side", min: 4500, perKm: 112.5 },
+    { type: "а/м 5т", maxWeight: 5000, load: "side", min: 5000, perKm: 144 },
+    { type: "а/м 5т гидролифт", maxWeight: 5000, load: "lift", min: 6000, perKm: 154 },
+    { type: "а/м 10т", maxWeight: 10000, load: "top", min: 8000, perKm: 210 },
+    { type: "Еврофура 20т", maxWeight: 20000, load: "top", min: 10000, perKm: 250 },
+    { type: "Манипулятор 5т", maxWeight: 5000, load: "manipulator", min: 15000, perKm: 240 },
+    { type: "Манипулятор 10т", maxWeight: 10000, load: "manipulator", min: 20000, perKm: 240 },
+    { type: "Манипулятор 15т", maxWeight: 15000, load: "manipulator", min: 25000, perKm: 240 }
+];
+
+// Расчёт маршрута
 async function buildRoute(from, to) {
     const apiKey = "5b3ce3597851110001cf62480793bada4b33404496495e4e014c8e3d";
 
@@ -13,21 +91,19 @@ async function buildRoute(from, to) {
         routeLine = L.geoJSON(geojson, { style: { color: "blue", weight: 4 } }).addTo(map);
 
         const routeCoords = geojson.features[0].geometry.coordinates;
-        let routeDistanceFromRadius = 0;
-        let enteredRadius = false;
         const center = turf.point([from[1], from[0]]);
+        let routeDistanceFromRadius = 0;
 
         for (let i = 1; i < routeCoords.length; i++) {
             const p1 = turf.point(routeCoords[i - 1]);
             const p2 = turf.point(routeCoords[i]);
             const segment = turf.lineString([routeCoords[i - 1], routeCoords[i]]);
 
-            const distFromCenter1 = turf.distance(center, p1, { units: 'kilometers' });
-            const distFromCenter2 = turf.distance(center, p2, { units: 'kilometers' });
+            const dist1 = turf.distance(center, p1, { units: 'kilometers' });
+            const dist2 = turf.distance(center, p2, { units: 'kilometers' });
 
-            if (distFromCenter1 > 40 || distFromCenter2 > 40) {
-                const segmentLength = turf.length(segment, { units: 'kilometers' });
-                routeDistanceFromRadius += segmentLength;
+            if (dist1 > 40 || dist2 > 40) {
+                routeDistanceFromRadius += turf.length(segment, { units: 'kilometers' });
             }
         }
 
@@ -36,27 +112,31 @@ async function buildRoute(from, to) {
         const loadingType = document.getElementById("loadingType").value;
         const adjustedWeight = (format === "mixed") ? weight * 1.5 : weight;
 
-        const suitableVehicles = vehicles.filter(v =>
+        const suitable = vehicles.filter(v =>
             v.maxWeight >= adjustedWeight &&
             (loadingType === "any" || v.load === loadingType)
         );
 
-        if (!suitableVehicles.length) {
+        if (!suitable.length) {
             document.getElementById("result").innerText = "Нет подходящего транспорта";
             return;
         }
 
-        const selected = suitableVehicles[0];
-        const overDistance = routeDistanceFromRadius;
-        const total = selected.min + overDistance * selected.perKm;
+        const selected = suitable[0];
+        const total = selected.min + routeDistanceFromRadius * selected.perKm;
 
         document.getElementById("result").innerText =
-            `Общая длина маршрута: ${(geojson.features[0].properties.summary.distance / 1000).toFixed(2)} км\nТип: ${selected.type}\nВ пределах 40 км: ${selected.min} ₽` +
-            (overDistance > 0 ? `\nЗа пределами 40 км: ${overDistance.toFixed(2)} км × ${selected.perKm} ₽ = ${(overDistance * selected.perKm).toFixed(2)} ₽` : "") +
-            `\nИтог: ${total.toFixed(2)} ₽`;
+            `Общая длина маршрута: ${(geojson.features[0].properties.summary.distance / 1000).toFixed(2)} км\n` +
+            `Тип автомобиля: ${selected.type}\n` +
+            `Стоимость в пределах 40 км: ${selected.min} ₽\n` +
+            `Сверх 40 км: ${routeDistanceFromRadius.toFixed(2)} км × ${selected.perKm} ₽ = ${(routeDistanceFromRadius * selected.perKm).toFixed(2)} ₽\n` +
+            `Итог: ${total.toFixed(2)} ₽`;
 
-    } catch (error) {
-        alert("Не удалось построить маршрут");
-        console.error(error);
+    } catch (err) {
+        alert("Ошибка при построении маршрута");
+        console.error(err);
     }
 }
+</script>
+</body>
+</html>
