@@ -1,109 +1,59 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Калькулятор доставки</title>
-    <script src="https://api-maps.yandex.ru/2.1/?apikey=b78d18c6-1c5f-472d-b3c8-adbd3c053ce7&lang=ru_RU"></script>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        label { display: block; margin-top: 10px; }
-        input, select { width: 300px; padding: 5px; }
-        button { margin-top: 15px; padding: 10px 20px; }
-        #map { width: 100%; height: 400px; margin-top: 20px; }
-        #result { margin-top: 20px; font-size: 16px; }
-    </style>
-</head>
-<body>
-    <h2>Калькулятор доставки</h2>
+<script>
+ymaps.ready(function () {
+    const warehouseCoords = [54.907129, 38.054109]; // Координаты склада
+    let map = new ymaps.Map("map", {
+        center: warehouseCoords,
+        zoom: 12
+    });
 
-    <label>Вес (в кг):</label>
-    <input id="weight" type="number" value="500">
+    // Метка склада
+    let warehousePlacemark = new ymaps.Placemark(warehouseCoords, {
+        iconCaption: 'Склад'
+    }, {
+        preset: 'islands#greenDotIconWithCaption'
+    });
+    map.geoObjects.add(warehousePlacemark);
 
-    <label>Формат плитки:</label>
-    <select id="format">
-        <option value="standard">Стандартный</option>
-        <option value="large">Крупный</option>
-        <option value="fragile">Хрупкий</option>
-    </select>
+    let clientPlacemark = null;
+    let route = null;
 
-    <label>Адрес клиента:</label>
-    <input id="address" type="text" placeholder="Например: Москва, ул. Тверская, 1">
+    // Клик по карте
+    map.events.add('click', function (e) {
+        const coords = e.get('coords');
 
-    <p>Кликните на карте, чтобы выбрать точку клиента. Склад по умолчанию: 54.907129, 38.054109</p>
-    <div id="map"></div>
-    <div id="result"></div>
+        // Удаляем старую метку клиента
+        if (clientPlacemark) {
+            map.geoObjects.remove(clientPlacemark);
+        }
 
-    <script>
-    ymaps.ready(function () {
-        const warehouseCoords = [54.907129, 38.054109];
-        let map = new ymaps.Map("map", {
-            center: warehouseCoords,
-            zoom: 12
+        // Ставим метку клиента
+        clientPlacemark = new ymaps.Placemark(coords, {
+            iconCaption: 'Клиент'
+        }, {
+            preset: 'islands#redDotIconWithCaption'
+        });
+        map.geoObjects.add(clientPlacemark);
+
+        // Определяем адрес по координатам
+        ymaps.geocode(coords).then(function (res) {
+            const firstGeoObject = res.geoObjects.get(0);
+            const address = firstGeoObject ? firstGeoObject.getAddressLine() : 'Адрес не найден';
+            document.getElementById('address').value = address;
         });
 
-        // Метка склада
-        let warehousePlacemark = new ymaps.Placemark(warehouseCoords, {
-            iconCaption: 'Склад'
-        }, { preset: 'islands#greenDotIconWithCaption' });
-        map.geoObjects.add(warehousePlacemark);
+        // Удаляем старый маршрут
+        if (route) {
+            map.geoObjects.remove(route);
+        }
 
-        let clientPlacemark;
-        let multiRoute;
-
-        // Обработка клика по карте
-        map.events.add('click', function (e) {
-            let coords = e.get('coords');
-
-            // Удаляем старую метку клиента
-            if (clientPlacemark) {
-                map.geoObjects.remove(clientPlacemark);
-            }
-
-            // Добавляем новую метку клиента
-            clientPlacemark = new ymaps.Placemark(coords, {
-                iconCaption: 'Клиент'
-            }, { preset: 'islands#redDotIconWithCaption' });
-            map.geoObjects.add(clientPlacemark);
-
-            // Получаем адрес точки (обратное геокодирование)
-            ymaps.geocode(coords).then(function (res) {
-                const geoObject = res.geoObjects.get(0);
-                if (geoObject) {
-                    const fullAddress = geoObject.getAddressLine();
-                    document.getElementById("address").value = fullAddress;
-                } else {
-                    document.getElementById("address").value = "Адрес не найден";
-                }
-            }).catch(function (err) {
-                console.error("Ошибка геокодирования:", err);
-                document.getElementById("address").value = "Ошибка геокодирования";
-            });
-
-            // Удаляем старый маршрут, если есть
-            if (multiRoute) {
-                map.geoObjects.remove(multiRoute);
-            }
-
-            // Строим маршрут от склада до точки клиента
-            multiRoute = new ymaps.multiRouter.MultiRoute({
-                referencePoints: [warehouseCoords, coords],
-                params: { routingMode: 'auto' }
-            }, {
-                boundsAutoApply: true
-            });
-
-            // Успешный маршрут
-            multiRoute.model.events.add("requestsuccess", function () {
-                map.geoObjects.add(multiRoute);
-            });
-
-            // Ошибка маршрута
-            multiRoute.model.events.add("requestfail", function (e) {
-                console.error("Ошибка маршрута:", e);
-                alert("Не удалось построить маршрут. Попробуйте выбрать другую точку.");
-            });
+        // Строим новый маршрут
+        ymaps.route([warehouseCoords, coords]).then(function (newRoute) {
+            route = newRoute;
+            map.geoObjects.add(route);
+            map.setBounds(route.getBounds(), { checkZoomRange: true });
+        }).catch(function (error) {
+            alert("Не удалось построить маршрут: " + error.message);
         });
     });
-    </script>
-</body>
-</html>
+});
+</script>
