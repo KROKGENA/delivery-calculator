@@ -46,12 +46,10 @@
     let clientMarker, routeLine, radiusCircle;
     const map = L.map('map').setView(warehouseCoords, 13);
 
-    // Добавляем карту OSM
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Добавляем маркер и радиус склада
     L.marker(warehouseCoords).addTo(map).bindPopup("Склад").openPopup();
     radiusCircle = L.circle(warehouseCoords, {
         radius: 40000,
@@ -72,7 +70,6 @@
         { type: "Манипулятор 15т", maxWeight: 15000, side: false, top: false, hydro: false, manip: true, min: 25000, perKm: 240 },
     ];
 
-    // Обработка клика по карте
     map.on('click', function(e) {
         const latlng = e.latlng;
         if (clientMarker) map.removeLayer(clientMarker);
@@ -89,11 +86,7 @@
         if (!address) return;
 
         const response = await axios.get("https://nominatim.openstreetmap.org/search", {
-            params: {
-                q: address,
-                format: "json",
-                limit: 1
-            }
+            params: { q: address, format: "json", limit: 1 }
         });
 
         if (response.data && response.data.length > 0) {
@@ -150,8 +143,12 @@
             }
 
             const selected = sorted[0];
-            const overDistance = Math.max(0, distanceKm - 40);
-            const total = selected.min + overDistance * selected.perKm;
+
+            const point = L.latLng(to[0], to[1]);
+            const center = L.latLng(warehouseCoords[0], warehouseCoords[1]);
+            const insideCircle = center.distanceTo(point) <= 40000;
+
+            const total = insideCircle ? selected.min : selected.min + (distanceKm - 40) * selected.perKm;
 
             document.getElementById("result").innerText = `Маршрут: ${distanceKm.toFixed(2)} км. Транспорт: ${selected.type}. Стоимость: ${total.toFixed(2)} ₽`;
         } catch (error) {
