@@ -28,10 +28,11 @@
         <option value="mixed">Микс</option>
     </select>
 
-    <label><input type="radio" name="option" value="side" id="sideLoading"> Боковая загрузка</label>
-    <label><input type="radio" name="option" value="top" id="topLoading"> Верхняя загрузка</label>
-    <label><input type="radio" name="option" value="hydro" id="hydrolift"> Гидролифт</label>
-    <label><input type="radio" name="option" value="manip" id="manipulator"> Манипулятор</label>
+    <label>Тип загрузки/требование:</label>
+    <label><input type="radio" name="loadingType" value="side"> Боковая загрузка</label>
+    <label><input type="radio" name="loadingType" value="top"> Верхняя загрузка</label>
+    <label><input type="radio" name="loadingType" value="hydrolift"> Гидролифт</label>
+    <label><input type="radio" name="loadingType" value="manipulator"> Манипулятор</label>
 
     <label>Адрес клиента:</label>
     <input id="address" type="text" placeholder="Например: Москва, ул. Тверская, 1">
@@ -76,7 +77,6 @@
         if (routeLine) map.removeLayer(routeLine);
 
         clientMarker = L.marker(latlng).addTo(map).bindPopup("Клиент").openPopup();
-
         reverseGeocode(latlng.lat, latlng.lng);
         buildRoute(warehouseCoords, [latlng.lat, latlng.lng]);
     });
@@ -129,33 +129,26 @@
             const distanceKm = geojson.features[0].properties.summary.distance / 1000;
             const weight = parseInt(document.getElementById("weight").value);
             const format = document.getElementById("format").value;
-            const option = document.querySelector('input[name="option"]:checked')?.value;
-
-            const side = option === "side";
-            const top = option === "top";
-            const hydro = option === "hydro";
-            const manip = option === "manip";
+            const typeInput = document.querySelector('input[name="loadingType"]:checked');
+            const type = typeInput ? typeInput.value : null;
 
             const adjustedWeight = (format === "mixed") ? weight * 1.5 : weight;
-            const filtered = vehicles.filter(v =>
+            const sorted = vehicles.filter(v =>
                 v.maxWeight >= adjustedWeight &&
-                (!side || v.side) &&
-                (!top || v.top) &&
-                (!hydro || v.hydro) &&
-                (!manip || v.manip)
+                ((type === "side" && v.side) ||
+                 (type === "top" && v.top) ||
+                 (type === "hydrolift" && v.hydro) ||
+                 (type === "manipulator" && v.manip))
             );
 
-            if (!filtered.length) {
+            if (!sorted.length) {
                 document.getElementById("result").innerText = "Нет подходящего транспорта";
                 return;
             }
 
-            const selected = filtered[0];
-            const clientPoint = turf.point([to[1], to[0]]);
-            const warehouseCircle = turf.circle([from[1], from[0]], 40, { units: 'kilometers' });
-            const isInside = turf.booleanPointInPolygon(clientPoint, warehouseCircle);
-
-            const total = isInside ? selected.min : selected.min + (distanceKm - 40) * selected.perKm;
+            const selected = sorted[0];
+            const overDistance = Math.max(0, distanceKm - 40);
+            const total = selected.min + overDistance * selected.perKm;
 
             document.getElementById("result").innerText = `Маршрут: ${distanceKm.toFixed(2)} км. Транспорт: ${selected.type}. Стоимость: ${total.toFixed(2)} ₽`;
         } catch (error) {
@@ -164,6 +157,5 @@
         }
     }
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 </body>
 </html>
